@@ -1,0 +1,80 @@
+<div class="cal-header">
+    <h6 class="mb-0 fw-bold text-capitalize">@Month.ToString("MMMM yyyy")</h6>
+    <div class="d-flex gap-1">
+        <button class="btn btn-sm btn-light" @onclick="() => Shift(-1)"><i class="bi bi-chevron-left"></i></button>
+        <button class="btn btn-sm btn-light" @onclick="() => Shift(0)"><i class="bi bi-circle"></i></button>
+        <button class="btn btn-sm btn-light" @onclick="() => Shift(1)"><i class="bi bi-chevron-right"></i></button>
+    </div>
+</div>
+<div class="cal-grid">
+    @foreach (var day in _dayNames)
+    {
+        <div class="cal-dow">@day</div>
+    }
+    @foreach (var cell in _cells)
+    {
+        @if (cell.Date is null)
+        {
+            <div class="cal-cell other-month"></div>
+        }
+        else
+        {
+            var d = cell.Date.Value;
+            var chips = GetChips?.Invoke(d) ?? new List<CalChip>();
+            var isSel = SelectedDate == d;
+            var isToday = d == DateOnly.FromDateTime(DateTime.Today);
+            <div class="cal-cell @(isSel ? "selected" : "") @(cell.OtherMonth ? "other-month" : "")"
+                 @onclick="() => OnSelect.InvokeAsync(d)">
+                <div class="day-num @(isToday ? "text-primary" : "")">@d.Day</div>
+                @foreach (var chip in chips.Take(3))
+                {
+                    <div class="cal-chip cal-chip-@chip.Color">@chip.Text</div>
+                }
+                @if (chips.Count > 3)
+                {
+                    <div style="font-size:.6rem;color:var(--pb-muted)">+@(chips.Count - 3) more</div>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public DateOnly Month { get; set; } = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1);
+    [Parameter] public DateOnly? SelectedDate { get; set; }
+    [Parameter] public Func<DateOnly, List<CalChip>>? GetChips { get; set; }
+    [Parameter] public EventCallback<DateOnly> OnSelect { get; set; }
+
+    private string[] _dayNames = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+    private List<(DateOnly? Date, bool OtherMonth)> _cells = new();
+
+    protected override void OnParametersSet()
+    {
+        Build();
+    }
+
+    private void Build()
+    {
+        _cells = new List<(DateOnly?, bool)>();
+        var daysInMonth = DateTime.DaysInMonth(Month.Year, Month.Month);
+        var firstDow = (int)new DateTime(Month.Year, Month.Month, 1).DayOfWeek;
+        var prevMonth = Month.AddMonths(-1);
+        var prevDays = DateTime.DaysInMonth(prevMonth.Year, prevMonth.Month);
+
+        for (int i = firstDow - 1; i >= 0; i--)
+            _cells.Add((prevMonth.AddDays(-(i)), true));
+        for (int d = 1; d <= daysInMonth; d++)
+            _cells.Add((new DateOnly(Month.Year, Month.Month, d), false));
+        var trailing = 42 - _cells.Count;
+        for (int n = 1; n <= trailing; n++)
+            _cells.Add((Month.AddMonths(1).AddDays(n - 1), true));
+    }
+
+    private void Shift(int delta)
+    {
+        Month = delta == 0 ? new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1) : Month.AddMonths(delta);
+        Build();
+    }
+
+    public record CalChip(string Text, string Color);
+}

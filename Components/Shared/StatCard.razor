@@ -1,0 +1,23 @@
+<div class="pb-stat-card">
+    <div class="pb-stat-icon @IconClass">
+        <i class="bi @Icon"></i>
+    </div>
+    <div class="pb-stat-body">
+        <div class="pb-stat-value">@Value</div>
+        <div class="pb-stat-label">@Label</div>
+        @if (!string.IsNullOrEmpty(Sub))
+        {
+            <div class="pb-stat-sub">@Sub</div>
+        }
+    </div>
+    @ChildContent
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public string Value { get; set; } = "";
+    [Parameter] public string? Sub { get; set; }
+    [Parameter] public string Icon { get; set; } = "bi-activity";
+    [Parameter] public string IconClass { get; set; } = "text-primary bg-primary-subtle";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

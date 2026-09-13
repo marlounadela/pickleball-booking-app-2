@@ -1,0 +1,58 @@
+@inject Picklebook.Services.ToastService Toast
+
+<div class="toast-host" id="toast-host">
+    @foreach (var t in _toasts)
+    {
+        <div class="pb-toast pb-toast-@t.Type" @key="t.Id">
+            <div class="d-flex align-items-start gap-2">
+                <div class="pb-toast-icon">
+                    @switch (t.Type)
+                    {
+                        case "success": <i class="bi bi-check-circle-fill"></i> break;
+                        case "danger": <i class="bi bi-exclamation-triangle-fill"></i> break;
+                        default: <i class="bi bi-info-circle-fill"></i> break;
+                    }
+                </div>
+                <div class="flex-grow-1">
+                    <div class="pb-toast-title">@t.Toast.Title</div>
+                    <div class="pb-toast-msg">@t.Toast.Message</div>
+                </div>
+                <button type="button" class="btn-close btn-close-white" @onclick="() => Dismiss(t.Id)"></button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private readonly List<(Guid Id, ToastMessage Toast, string Type)> _toasts = new();
+
+    protected override void OnInitialized()
+    {
+        Toast.OnShow += Handle;
+    }
+
+    private void Handle(ToastMessage message)
+    {
+        var id = Guid.NewGuid();
+        _toasts.Add((id, message, message.Type));
+        StateHasChanged();
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(4200);
+            Dismiss(id);
+        });
+    }
+
+    private void Dismiss(Guid id)
+    {
+        var item = _toasts.FirstOrDefault(t => t.Id == id);
+        if (item.Id == Guid.Empty) return;
+        _toasts.Remove(item);
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Toast.OnShow -= Handle;
+    }
+}

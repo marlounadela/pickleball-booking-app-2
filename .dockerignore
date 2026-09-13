@@ -1,0 +1,11 @@
+# Build artifacts that must never enter the Docker context or the runtime image.
+bin
+obj
+.tools
+_smoketest
+.git
+.gitignore
+*.log
+*.db
+*.db-wal
+*.db-shm

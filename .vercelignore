@@ -1,0 +1,15 @@
+bin
+obj
+.tools
+_smoketest
+.git
+.gitignore
+.dockerignore
+Data
+*.log
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.local
+.env.*.local

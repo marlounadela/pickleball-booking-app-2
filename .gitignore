@@ -1,0 +1,25 @@
+# .NET build artifacts
+bin/
+obj/
+.tools/
+
+# SQLite runtime database (created by EF migrations on first boot — never commit it)
+Data/*.db
+Data/*.db-wal
+Data/*.db-shm
+
+# Local testing / smoke tests
+_smoketest/
+*.log
+
+# Local env files — never commit real secrets
+.env
+.env.local
+.env.*.local
+
+# Keep the template so onboarding shows which variables exist
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db

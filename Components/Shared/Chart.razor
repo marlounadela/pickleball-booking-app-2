@@ -1,0 +1,90 @@
+@inject IJSRuntime JS
+
+<div>
+    <canvas id="@_canvasId" style="display:block; height:@(Height)px; width:100%;"></canvas>
+</div>
+
+@code {
+    [Parameter] public string ChartType { get; set; } = "line";
+    [Parameter] public string[]? Labels { get; set; }
+    [Parameter] public decimal[]? Values { get; set; }
+    [Parameter] public string[]? BackgroundColors { get; set; }
+    [Parameter] public string? BorderColor { get; set; }
+    [Parameter] public int Height { get; set; } = 240;
+    [Parameter] public bool ShowLegend { get; set; } = true;
+    [Parameter] public bool Fill { get; set; } = true;
+    [Parameter] public string? Label { get; set; }
+
+    private string _canvasId = $"pb-chart-{Guid.NewGuid():N}";
+    private string? _lastKey;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var key = $"{ChartType}|{(Labels is null ? "" : string.Join(",", Labels))}|{(Values is null ? "" : string.Join(",", Values))}";
+        if (key == _lastKey && !firstRender) return;
+        _lastKey = key;
+        if (Labels is null || Values is null || Labels.Length == 0 || Values.Length == 0)
+        {
+            await JS.InvokeVoidAsync("pbChart.destroy", _canvasId);
+            return;
+        }
+
+        var colors = BackgroundColors ?? Enumerable.Range(0, Labels.Length)
+            .Select(i => PickColor(i)).ToArray();
+
+        var config = new
+        {
+            type = ChartType,
+            data = new
+            {
+                labels = Labels,
+                datasets = new[]
+                {
+                    new
+                    {
+                        label = Label,
+                        data = Values,
+                        backgroundColor = ChartType == "doughnut" ? colors : ChartType == "bar" ? colors : new[] { "rgba(99,102,241,0.18)" },
+                        borderColor = BorderColor ?? "#6366f1",
+                        borderWidth = 2,
+                        fill = Fill,
+                        tension = 0.35,
+                        borderRadius = ChartType == "bar" ? 6 : 0
+                    }
+                }
+            },
+            options = new
+            {
+                responsive = true,
+                maintainAspectRatio = false,
+                plugins = new
+                {
+                    legend = new { display = ShowLegend, position = "bottom" as string },
+                    tooltip = new { mode = "index", intersect = false }
+                },
+                scales = ChartType == "doughnut" ? (object?)null : new
+                {
+                    y = new { beginAtZero = true, grid = new { color = "rgba(148,163,184,0.14)" } },
+                    x = new { grid = new { display = false } }
+                }
+            }
+        };
+
+        await JS.InvokeVoidAsync("pbChart.create", _canvasId, config);
+    }
+
+    public async Task RefreshAsync()
+    {
+        _lastKey = null;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static string PickColor(int i)
+    {
+        var palette = new[]
+        {
+            "#6366f1", "#22c55e", "#f59e0b", "#ef4444", "#06b6d4", "#8b5cf6", "#ec4899", "#84cc16", "#f97316", "#14b8a6"
+        };
+        return palette[i % palette.Length];
+    }
+}

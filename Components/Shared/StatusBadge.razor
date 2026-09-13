@@ -1,0 +1,19 @@
+<span class="badge @GetClass">@Text</span>
+
+@code {
+    [Parameter] public string Status { get; set; } = "";
+    [Parameter] public object? StatusValue { get; set; }
+
+    private string Text => Status;
+
+    private string GetClass => (StatusValue?.ToString() ?? Status) switch
+    {
+        "Active" or "Available" or "Paid" or "Confirmed" or "Completed" or "Success" or "Open" => "pb-badge-success",
+        "Pending" or "PartiallyPaid" or "Maintenance" => "pb-badge-warning",
+        "Cancelled" or "NoShow" or "Failed" or "Inactive" or "Suspended" or "Closed" => "pb-badge-danger",
+        "Refunded" => "pb-badge-purple",
+        "Indoor" => "pb-badge-primary",
+        "Outdoor" => "pb-badge-cyan",
+        _ => "pb-badge-neutral"
+    };
+}

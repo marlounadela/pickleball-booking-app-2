@@ -1,0 +1,61 @@
+@implements IAsyncDisposable
+
+<div class="modal fade @(_visible ? "show d-block" : "")" tabindex="-1" style="@(_visible ? "background: rgba(15,23,42,.45)" : "display:none")">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-body p-4 text-center">
+                <div class="pb-confirm-icon @(IsDanger ? "bg-danger-subtle text-danger" : "bg-primary-subtle text-primary")">
+                    <i class="bi @(IsDanger ? "bi-exclamation-triangle" : "bi-question-circle")"></i>
+                </div>
+                <h5 class="fw-bold mt-3 mb-1">@Title</h5>
+                <p class="text-secondary mb-4">@Message</p>
+                <div class="d-flex gap-2 justify-content-center">
+                    <button type="button" class="btn btn-light px-4" @onclick="Cancel">Cancel</button>
+                    <button type="button" class="btn @(IsDanger ? "btn-danger" : "btn-primary") px-4" @onclick="Confirm">@ConfirmText</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = "Are you sure?";
+    [Parameter] public string Message { get; set; } = "";
+    [Parameter] public string ConfirmText { get; set; } = "Yes, continue";
+    [Parameter] public bool IsDanger { get; set; } = true;
+
+    private bool _visible;
+    private TaskCompletionSource<bool>? _tcs;
+
+    public Task<bool> ShowAsync(string message, string title = "Are you sure?", string confirmText = "Yes, continue", bool danger = true)
+    {
+        Title = title;
+        Message = message;
+        ConfirmText = confirmText;
+        IsDanger = danger;
+        _tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _visible = true;
+        StateHasChanged();
+        return _tcs.Task;
+    }
+
+    private void Confirm()
+    {
+        _visible = false;
+        _tcs?.TrySetResult(true);
+        StateHasChanged();
+    }
+
+    private void Cancel()
+    {
+        _visible = false;
+        _tcs?.TrySetResult(false);
+        StateHasChanged();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _tcs?.TrySetResult(false);
+        await Task.CompletedTask;
+    }
+}

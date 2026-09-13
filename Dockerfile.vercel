@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1
+#
+# Vercel Container Image (beta) — https://vercel.com/docs/functions/container-images
+# Vercel auto-detects `Dockerfile.vercel` at the project root, builds this image,
+# stores it in Vercel Container Registry, and routes ALL traffic to the container.
+# The process MUST listen on the PORT environment variable that Vercel injects.
+
+# ---------- build stage (Linux .NET SDK) ----------
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+# Copy sources only (see .dockerignore for exclusions).
+COPY . .
+
+# Restore + production build entirely on Linux so Windows artifacts never ship.
+# `publish` produces a self-contained output that includes wwwroot/ static assets.
+RUN dotnet publish -c Release -o /out
+
+# ---------- runtime stage (slim ASP.NET Core runtime) ----------
+FROM mcr.microsoft.com/dotnet/aspnet:8.0
+WORKDIR /app
+
+# Run as a non-root user (basic container hardening).
+RUN useradd --system --create-home --shell /usr/sbin/nologin picklebook \
+    && chown -R picklebook:picklebook /app
+USER picklebook
+
+# Copy the self-contained publish output (app, appsettings, wwwroot assets, native libs).
+COPY --from=build /out/ .
+
+# Vercel passes $PORT at runtime; ENV here makes `docker run` work out of the box too.
+ENV PORT=8080
+EXPOSE 8080
+
+# SQLite database lives relative to the working directory (see DEPLOYMENT.md for the
+# important note about ephemeral vs persistent storage on Vercel).
+ENV DATABASE_URL="DataSource=Data/app.db;Cache=Shared"
+
+# The entrypoint creates the SQLite data directory on every boot (fresh containers have
+# no volume), then execs the server so signals/PIDs are handled natively by the platform.
+ENTRYPOINT ["/bin/sh", "-c", "mkdir -p Data && exec dotnet Picklebook.dll"]

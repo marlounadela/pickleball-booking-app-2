@@ -1,0 +1,75 @@
+using Microsoft.EntityFrameworkCore;
+using Picklebook.Data;
+using Picklebook.Domain;
+
+namespace Picklebook.Services;
+
+public class DashboardModel
+{
+    public TodayStats Today { get; set; } = new();
+    public List<DailyPoint> Series { get; set; } = new();
+    public List<BookingOnDay> TodaySchedule { get; set; } = new();
+    public List<Transaction> RecentTransactions { get; set; } = new();
+    public List<Booking> UpcomingBookings { get; set; } = new();
+    public int AvailableCourts { get; set; }
+    public int OccupiedCourts { get; set; }
+    public int PendingPayments { get; set; }
+}
+
+public class DashboardService(ApplicationDbContext db, RevenueService revenue, IUserContext userContext)
+{
+    public async Task<DashboardModel?> GetAsync(Guid yardId)
+    {
+        if (!userContext.IsAuthenticated) return null;
+        var yard = await db.Yards.FirstOrDefaultAsync(y => y.Id == yardId && y.OwnerId == userContext.UserId && !y.IsDeleted);
+        if (yard is null) return null;
+
+        var today = YardTime.Today(yard.TimeZoneId);
+        var model = new DashboardModel
+        {
+            Today = await revenue.GetTodayStatsAsync(yardId),
+            Series = await revenue.GetSeriesAsync(yardId, 14)
+        };
+
+        // today's schedule
+        var day = await db.Bookings.AsNoTracking().Include(b => b.Court)
+            .Where(b => b.YardId == yardId && b.BookingDate == today)
+            .OrderBy(b => b.StartTime)
+            .ToListAsync();
+        model.TodaySchedule = day.Where(b => BookingActiveStatuses.Values.Contains(b.Status))
+            .Select(b => new BookingOnDay(b.Id, b.CourtId, b.StartTime, b.EndTime,
+                $"{b.CustomerName} · {b.Court?.Name}", b.Status, b.BookingRef, b.TotalAmount, b.Court?.Name ?? ""))
+            .ToList();
+
+        // recent transactions
+        model.RecentTransactions = await db.Transactions.AsNoTracking()
+            .Include(t => t.Booking)
+            .Where(t => t.YardId == yardId)
+            .OrderByDescending(t => t.CreatedAtUtc).Take(8)
+            .ToListAsync();
+
+        // upcoming bookings
+        model.UpcomingBookings = await db.Bookings.AsNoTracking().Include(b => b.Court)
+            .Where(b => b.YardId == yardId && b.BookingDate >= today && BookingActiveStatuses.Values.Contains(b.Status))
+            .OrderBy(b => b.BookingDate).ThenBy(b => b.StartTime).Take(10)
+            .ToListAsync();
+
+        model.PendingPayments = await db.Bookings.CountAsync(b => b.YardId == yardId &&
+            BookingActiveStatuses.Values.Contains(b.Status) && b.PaymentStatus != PaymentStatus.Paid);
+
+        // court availability overview (right now)
+        var courts = await db.Courts.AsNoTracking().Where(c => c.YardId == yardId && c.Status == CourtStatus.Available).ToListAsync();
+        var activeNow = await db.Bookings.AnyAsync(b =>
+            b.YardId == yardId && b.BookingDate == today && b.StartTime <= YardTime.NowInZone(yard.TimeZoneId).TimeOfDay
+            && b.EndTime > YardTime.NowInZone(yard.TimeZoneId).TimeOfDay && BookingActiveStatuses.Values.Contains(b.Status));
+        // A court is "occupied" if it has an active booking happening right now.
+        var occupiedNow = await db.Bookings.AsNoTracking()
+            .Where(b => b.YardId == yardId && b.BookingDate == today && BookingActiveStatuses.Values.Contains(b.Status))
+            .Where(b => b.StartTime <= YardTime.NowInZone(yard.TimeZoneId).TimeOfDay && b.EndTime > YardTime.NowInZone(yard.TimeZoneId).TimeOfDay)
+            .Select(b => b.CourtId).Distinct().ToListAsync();
+        model.AvailableCourts = Math.Max(0, courts.Count - occupiedNow.Count);
+        model.OccupiedCourts = occupiedNow.Count;
+
+        return model;
+    }
+}
