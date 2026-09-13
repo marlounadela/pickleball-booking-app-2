@@ -116,6 +116,12 @@ builder.Services.AddSingleton<IEmailSender<ApplicationUser>, IdentityNoOpEmailSe
 
 builder.Services.AddScoped<ToastService>();
 
+// Container platforms (Vercel, Docker, Fly) inject PORT. Listen on it when present;
+// fall back to the launchSettings / ASPNETCORE_URLS value for local development.
+var port = Environment.GetEnvironmentVariable("PORT");
+if (!string.IsNullOrWhiteSpace(port))
+    builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+
 var app = builder.Build();
 
 // ---------- apply migrations + seed ----------
