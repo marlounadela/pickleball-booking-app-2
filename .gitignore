@@ -23,3 +23,8 @@ _smoketest/
 # OS / editor
 .DS_Store
 Thumbs.db
+
+# Vercel local state
+.vercel
+.env*
+!.env.example
