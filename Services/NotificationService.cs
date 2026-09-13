@@ -149,9 +149,11 @@ public class NotificationService(ApplicationDbContext db, INotificationSender se
         return await q.OrderByDescending(n => n.CreatedAtUtc).Take(take).ToListAsync();
     }
 
-    public async Task MarkReadAsync(Guid notificationId)
+    public async Task MarkReadAsync(Guid notificationId, string? userId = null)
     {
-        var n = await db.Notifications.FirstOrDefaultAsync(x => x.Id == notificationId);
+        var query = db.Notifications.Where(x => x.Id == notificationId);
+        if (!string.IsNullOrEmpty(userId)) query = query.Where(x => x.UserId == userId);
+        var n = await query.FirstOrDefaultAsync();
         if (n is null) return;
         n.IsRead = true;
         await db.SaveChangesAsync();

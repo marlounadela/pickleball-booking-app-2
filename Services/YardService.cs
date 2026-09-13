@@ -20,16 +20,21 @@ public class YardService(ApplicationDbContext db, IUserContext userContext, Audi
     {
         if (string.IsNullOrWhiteSpace(input)) return string.Empty;
         var s = input.Trim().ToLowerInvariant();
-        var sb = new System.Text.StringBuilder();
+        var sb = new System.Text.StringBuilder(s.Length);
         foreach (var ch in s)
         {
-            if (char.IsAsciiLetterOrDigit(ch) && (ch is >= 'a' and <= 'z' || ch is >= '0' and <= '9')) sb.Append(ch);
-            else if (ch is '-' or ' ' or '_') sb.Append('-');
+            if (char.IsAsciiLetterOrDigit(ch)) sb.Append(ch);
+            else if (ch is '-' or ' ' or '_' or '.') sb.Append('-');
         }
         var cleaned = string.Join("-", sb.ToString().Split('-', StringSplitOptions.RemoveEmptyEntries));
         if (cleaned.Length > 60) cleaned = cleaned[..60];
         return cleaned;
     }
+
+    private static readonly string[] ReservedSlugs = ["app", "www", "admin", "api", "mail"];
+
+    private static bool IsReservedSlug(string slug) =>
+        ReservedSlugs.Any(r => slug == r || slug.StartsWith(r + "-", StringComparison.Ordinal));
 
     public async Task<YardResult> CreateAsync(Yard yard, string ownerId, string slugHint)
     {
@@ -38,7 +43,7 @@ public class YardService(ApplicationDbContext db, IUserContext userContext, Audi
         if (string.IsNullOrWhiteSpace(yard.Slug)) yard.Slug = Slugify(slugHint);
         else yard.Slug = Slugify(yard.Slug);
         if (yard.Slug.Length < 3) return YardResult.Fail("Yard slug must be at least 3 characters (letters, numbers, dashes).");
-        if (yard.Slug.StartsWith("app") || yard.Slug.StartsWith("www") || yard.Slug.StartsWith("admin"))
+        if (IsReservedSlug(yard.Slug))
             return YardResult.Fail("That subdomain name is reserved.");
 
         if (await db.Yards.IgnoreQueryFilters().AnyAsync(x => x.Slug == yard.Slug))
@@ -140,7 +145,9 @@ public class YardService(ApplicationDbContext db, IUserContext userContext, Audi
 
     public async Task<string> SaveUploadedImageAsync(IBrowserFile file, string folder)
     {
-        var dir = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", folder);
+        var safeFolder = Slugify(folder);
+        if (string.IsNullOrWhiteSpace(safeFolder)) safeFolder = "general";
+        var dir = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", safeFolder);
         Directory.CreateDirectory(dir);
         var ext = Path.GetExtension(file.Name).ToLowerInvariant();
         if (ext is not (".png" or ".jpg" or ".jpeg" or ".webp" or ".gif" or ".svg"))
@@ -149,6 +156,6 @@ public class YardService(ApplicationDbContext db, IUserContext userContext, Audi
         var fullPath = Path.Combine(dir, fileName);
         await using var fs = File.Create(fullPath);
         await file.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024).CopyToAsync(fs);
-        return $"/uploads/{folder}/{fileName}";
+        return $"/uploads/{safeFolder}/{fileName}";
     }
 }

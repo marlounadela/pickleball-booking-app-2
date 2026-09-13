@@ -21,10 +21,11 @@ public class DashboardService(ApplicationDbContext db, RevenueService revenue, I
     public async Task<DashboardModel?> GetAsync(Guid yardId)
     {
         if (!userContext.IsAuthenticated) return null;
-        var yard = await db.Yards.FirstOrDefaultAsync(y => y.Id == yardId && y.OwnerId == userContext.UserId && !y.IsDeleted);
+        var yard = await db.Yards.AsNoTracking().FirstOrDefaultAsync(y => y.Id == yardId && y.OwnerId == userContext.UserId && !y.IsDeleted);
         if (yard is null) return null;
 
         var today = YardTime.Today(yard.TimeZoneId);
+        var now = YardTime.NowInZone(yard.TimeZoneId).TimeOfDay;
         var model = new DashboardModel
         {
             Today = await revenue.GetTodayStatsAsync(yardId),
@@ -58,16 +59,12 @@ public class DashboardService(ApplicationDbContext db, RevenueService revenue, I
             BookingActiveStatuses.Values.Contains(b.Status) && b.PaymentStatus != PaymentStatus.Paid);
 
         // court availability overview (right now)
-        var courts = await db.Courts.AsNoTracking().Where(c => c.YardId == yardId && c.Status == CourtStatus.Available).ToListAsync();
-        var activeNow = await db.Bookings.AnyAsync(b =>
-            b.YardId == yardId && b.BookingDate == today && b.StartTime <= YardTime.NowInZone(yard.TimeZoneId).TimeOfDay
-            && b.EndTime > YardTime.NowInZone(yard.TimeZoneId).TimeOfDay && BookingActiveStatuses.Values.Contains(b.Status));
-        // A court is "occupied" if it has an active booking happening right now.
         var occupiedNow = await db.Bookings.AsNoTracking()
             .Where(b => b.YardId == yardId && b.BookingDate == today && BookingActiveStatuses.Values.Contains(b.Status))
-            .Where(b => b.StartTime <= YardTime.NowInZone(yard.TimeZoneId).TimeOfDay && b.EndTime > YardTime.NowInZone(yard.TimeZoneId).TimeOfDay)
+            .Where(b => b.StartTime <= now && b.EndTime > now)
             .Select(b => b.CourtId).Distinct().ToListAsync();
-        model.AvailableCourts = Math.Max(0, courts.Count - occupiedNow.Count);
+        var totalCourts = await db.Courts.AsNoTracking().CountAsync(c => c.YardId == yardId && c.Status == CourtStatus.Available);
+        model.AvailableCourts = Math.Max(0, totalCourts - occupiedNow.Count);
         model.OccupiedCourts = occupiedNow.Count;
 
         return model;

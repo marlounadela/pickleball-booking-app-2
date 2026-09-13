@@ -16,13 +16,33 @@ public class ServerUserContext(AuthenticationStateProvider authenticationStatePr
 {
     private ClaimsPrincipal? _principal;
 
-    public string? UserId { get; private set; }
-    public bool IsAuthenticated => !string.IsNullOrEmpty(UserId);
+    public string? UserId => GetPrincipal().FindFirstValue(ClaimTypes.NameIdentifier);
+
+    public bool IsAuthenticated => GetPrincipal().Identity?.IsAuthenticated == true
+        && !string.IsNullOrEmpty(UserId);
 
     public async Task<bool> IsInRoleAsync(string role)
     {
         var p = await GetPrincipalAsync();
         return p.IsInRole(role);
+    }
+
+    private ClaimsPrincipal GetPrincipal()
+    {
+        // Never cache an anonymous principal: the auth state may resolve a moment later
+        // (or change after sign-in/out). Only an authenticated principal is sticky.
+        try
+        {
+            var task = authenticationStateProvider.GetAuthenticationStateAsync();
+            if (task.IsCompletedSuccessfully && task.Result.User.Identity?.IsAuthenticated == true)
+            {
+                _principal = task.Result.User;
+                return _principal;
+            }
+        }
+        catch { /* fall through to cached/empty principal */ }
+        if (_principal is not null) return _principal;
+        return new ClaimsPrincipal(new ClaimsIdentity());
     }
 
     private async Task<ClaimsPrincipal> GetPrincipalAsync()
@@ -31,7 +51,6 @@ public class ServerUserContext(AuthenticationStateProvider authenticationStatePr
         {
             var state = await authenticationStateProvider.GetAuthenticationStateAsync();
             _principal = state.User;
-            UserId = _principal.FindFirstValue(ClaimTypes.NameIdentifier);
         }
         return _principal;
     }

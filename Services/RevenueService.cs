@@ -43,9 +43,10 @@ public class RevenueService(ApplicationDbContext db, IUserContext userContext, B
         var today = YardTime.Today(yard?.TimeZoneId ?? AppConstants.DefaultTimeZone);
 
         var stats = new TodayStats { Date = today };
-        var todayBookings = (await db.Bookings.AsNoTracking()
+        var todayBookings = await db.Bookings.AsNoTracking()
             .Where(b => b.YardId == yardId && b.BookingDate == today)
-            .ToListAsync())?? [];
+            .Select(b => new { b.Id, b.Status, b.TotalAmount, b.PaymentStatus })
+            .ToListAsync();
 
         stats.TodayBookings = todayBookings.Count(b => BookingActiveStatuses.Values.Contains(b.Status));
         stats.TodayCompleted = todayBookings.Count(b => b.Status == BookingStatus.Completed);
@@ -55,14 +56,22 @@ public class RevenueService(ApplicationDbContext db, IUserContext userContext, B
         stats.Refunds = total?.RefundTotal ?? 0;
         stats.NetRevenue = total?.NetTotal ?? 0;
 
-        var paidPerBooking = await db.Payments.AsNoTracking()
-            .Where(p => p.Status == PaymentStatus.Paid && p.Booking!.BookingDate == today && p.Booking.YardId == yardId)
-            .GroupBy(p => p.BookingId)
-            .Select(g => new { BookingId = g.Key, Sum = g.Sum(p => p.Amount) })
-            .ToListAsync();
-        stats.PendingAmount = todayBookings
+        var activeUnpaid = todayBookings
             .Where(b => BookingActiveStatuses.Values.Contains(b.Status) && b.PaymentStatus != PaymentStatus.Paid)
-            .Sum(b => Math.Max(0, b.TotalAmount - (paidPerBooking.FirstOrDefault(p => p.BookingId == b.Id)?.Sum ?? 0)));
+            .ToList();
+        if (activeUnpaid.Count > 0)
+        {
+            var activeIds = activeUnpaid.Select(b => b.Id).ToList();
+            var paidByBooking = await db.Payments.AsNoTracking()
+                .Where(p => p.Status == PaymentStatus.Paid && p.Booking!.YardId == yardId
+                    && p.Booking.BookingDate == today && activeIds.Contains(p.BookingId))
+                .GroupBy(p => p.BookingId)
+                .Select(g => new { BookingId = g.Key, Sum = g.Sum(p => p.Amount) })
+                .ToListAsync();
+            var paidLookup = paidByBooking.ToDictionary(x => x.BookingId, x => x.Sum);
+            stats.PendingAmount = activeUnpaid
+                .Sum(b => Math.Max(0, b.TotalAmount - (paidLookup.TryGetValue(b.Id, out var paid) ? paid : 0)));
+        }
 
         stats.UpcomingValue = await db.Bookings.AsNoTracking()
             .Where(b => b.YardId == yardId && b.BookingDate > today && BookingActiveStatuses.Values.Contains(b.Status))
@@ -104,36 +113,36 @@ public class RevenueService(ApplicationDbContext db, IUserContext userContext, B
 
     public async Task<List<(string Label, decimal Amount)>> RevenueByCourtAsync(Guid yardId, DateOnly from, DateOnly to)
     {
-        var tx = await db.Transactions.AsNoTracking()
-            .Include(t => t.Booking)!.ThenInclude(b => b!.Court)
+        return await db.Transactions.AsNoTracking()
             .Where(t => t.YardId == yardId && t.TransactionDate >= from && t.TransactionDate <= to && t.Status == PaymentStatus.Paid)
-            .ToListAsync();
-        return tx.GroupBy(t => t.Booking?.Court?.Name ?? "Unassigned")
-            .Select(g => (g.Key, g.Sum(x => x.Amount)))
+            .GroupBy(t => t.Booking != null && t.Booking.Court != null ? t.Booking.Court.Name : "Unassigned")
+            .Select(g => new ValueTuple<string, decimal>(g.Key, g.Sum(x => x.Amount)))
             .OrderByDescending(x => x.Item2)
-            .ToList();
+            .ToListAsync();
     }
 
     public async Task<List<(string Label, decimal Amount)>> RevenueByBookingStatusAsync(Guid yardId, DateOnly from, DateOnly to)
     {
-        var tx = await db.Transactions.AsNoTracking()
-            .Include(t => t.Booking)
+        var rows = await db.Transactions.AsNoTracking()
             .Where(t => t.YardId == yardId && t.TransactionDate >= from && t.TransactionDate <= to && t.Status == PaymentStatus.Paid)
+            .GroupBy(t => t.Booking != null ? (BookingStatus?)t.Booking.Status : null)
+            .Select(g => new { Status = g.Key, Amount = g.Sum(x => x.Amount) })
             .ToListAsync();
-        return tx.GroupBy(t => t.Booking?.Status.ToString() ?? "Unassigned")
-            .Select(g => (g.Key, g.Sum(x => x.Amount)))
+        return rows
+            .Select(r => (r.Status?.ToString() ?? "Unassigned", r.Amount))
             .OrderByDescending(x => x.Item2)
             .ToList();
     }
 
     public async Task<List<(string Label, decimal Amount)>> RevenueByPaymentStatusAsync(Guid yardId, DateOnly from, DateOnly to)
     {
-        var tx = await db.Transactions.AsNoTracking()
-            .Include(t => t.Booking)
+        var rows = await db.Transactions.AsNoTracking()
             .Where(t => t.YardId == yardId && t.TransactionDate >= from && t.TransactionDate <= to && t.Status == PaymentStatus.Paid)
+            .GroupBy(t => t.Booking != null ? (PaymentStatus?)t.Booking.PaymentStatus : null)
+            .Select(g => new { Status = g.Key, Amount = g.Sum(x => x.Amount) })
             .ToListAsync();
-        return tx.GroupBy(t => t.Booking?.PaymentStatus.ToString() ?? "—")
-            .Select(g => (g.Key, g.Sum(x => x.Amount)))
+        return rows
+            .Select(r => (r.Status?.ToString() ?? "—", r.Amount))
             .OrderByDescending(x => x.Item2)
             .ToList();
     }

@@ -50,6 +50,8 @@ public class AvailabilityService(ApplicationDbContext db)
         if (courtId.HasValue) courtsQuery = courtsQuery.Where(c => c.Id == courtId.Value);
         var courts = await courtsQuery.OrderBy(c => c.Number).ThenBy(c => c.Name).ToListAsync();
 
+        // Performance: only the current weekday matters for operating hours, and blocks/rules
+        // only matter when they can overlap the requested date.
         var weekday = (int)date.DayOfWeek;
         var yardHours = await db.OperatingHours.AsNoTracking()
             .Where(o => o.YardId == yardId && o.CourtId == null && o.DayOfWeek == weekday).ToListAsync();
@@ -58,9 +60,15 @@ public class AvailabilityService(ApplicationDbContext db)
             .Where(o => o.YardId == yardId && courtIds.Contains(o.CourtId ?? Guid.Empty) && o.DayOfWeek == weekday).ToListAsync();
 
         var blocks = await db.BlockedSchedules.AsNoTracking()
-            .Where(b => b.YardId == yardId).ToListAsync();
+            .Where(b => b.YardId == yardId
+                && (b.SingleDate == null || b.SingleDate == date)
+                && (b.StartDate == null || b.StartDate <= date)
+                && (b.EndDate == null || b.EndDate >= date)).ToListAsync();
         var rules = await db.AvailabilityRules.AsNoTracking()
-            .Where(r => r.YardId == yardId && r.IsActive).ToListAsync();
+            .Where(r => r.YardId == yardId && r.IsActive
+                && (r.SingleDate == null || r.SingleDate == date)
+                && (r.StartDate == null || r.StartDate <= date)
+                && (r.EndDate == null || r.EndDate >= date)).ToListAsync();
 
         var bookings = await db.Bookings.AsNoTracking()
             .Where(b => b.YardId == yardId && b.BookingDate == date &&
@@ -199,8 +207,16 @@ public class AvailabilityService(ApplicationDbContext db)
             .Where(o => o.YardId == yardId && o.CourtId == null && o.DayOfWeek == weekday).ToListAsync();
         var courtHours = await db.OperatingHours.AsNoTracking()
             .Where(o => o.YardId == yardId && o.DayOfWeek == weekday).ToListAsync();
-        var blocks = await db.BlockedSchedules.AsNoTracking().Where(b => b.YardId == yardId).ToListAsync();
-        var rules = await db.AvailabilityRules.AsNoTracking().Where(r => r.YardId == yardId && r.IsActive).ToListAsync();
+        var blocks = await db.BlockedSchedules.AsNoTracking()
+            .Where(b => b.YardId == yardId
+                && (b.SingleDate == null || b.SingleDate == date)
+                && (b.StartDate == null || b.StartDate <= date)
+                && (b.EndDate == null || b.EndDate >= date)).ToListAsync();
+        var rules = await db.AvailabilityRules.AsNoTracking()
+            .Where(r => r.YardId == yardId && r.IsActive
+                && (r.SingleDate == null || r.SingleDate == date)
+                && (r.StartDate == null || r.StartDate <= date)
+                && (r.EndDate == null || r.EndDate >= date)).ToListAsync();
         var bookings = await db.Bookings.AsNoTracking()
             .Include(b => b.Court)
             .Where(b => b.YardId == yardId && b.BookingDate == date &&

@@ -21,27 +21,45 @@ public class CustomerService(ApplicationDbContext db, IUserContext userContext)
     public async Task<List<CustomerRow>> GetCustomersAsync(Guid yardId, string? q = null, int take = 300)
     {
         if (!userContext.IsAuthenticated) return [];
-        var customers = await db.Customers.AsNoTracking()
-            .Include(c => c.Bookings)
-            .Where(c => c.YardId == yardId && c.Yard!.OwnerId == userContext.UserId)
-            .OrderByDescending(c => c.CreatedAtUtc)
-            .Take(1000)
-            .ToListAsync();
-
+        var query = db.Customers.AsNoTracking()
+            .Where(c => c.YardId == yardId && c.Yard!.OwnerId == userContext.UserId);
         if (!string.IsNullOrWhiteSpace(q))
-            customers = customers.Where(c => c.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
-                || (c.Email ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)
-                || (c.Phone ?? "").Contains(q)).ToList();
+            query = query.Where(c => c.Name.Contains(q) || (c.Email ?? "").Contains(q) || (c.Phone ?? "").Contains(q));
+        var customers = await query
+            .OrderByDescending(c => c.CreatedAtUtc)
+            .Select(c => new { c.Id, c.Name, c.Email, c.Phone })
+            .Take(Math.Max(1, take))
+            .ToListAsync();
+        if (customers.Count == 0) return [];
 
-        return customers.Take(take).Select(c => new CustomerRow
+        var ids = customers.Select(c => c.Id).ToList();
+        var stats = await db.Bookings.AsNoTracking()
+            .Where(b => b.YardId == yardId && ids.Contains(b.CustomerId))
+            .GroupBy(b => b.CustomerId)
+            .Select(g => new
+            {
+                CustomerId = g.Key,
+                Count = g.Count(b => b.Status != BookingStatus.Cancelled && b.Status != BookingStatus.NoShow),
+                Total = g.Where(b => b.Status != BookingStatus.Cancelled && b.Status != BookingStatus.NoShow)
+                    .Sum(b => (decimal?)b.TotalAmount) ?? 0,
+                Last = g.Max(b => (DateTime?)b.CreatedAtUtc)
+            })
+            .ToListAsync();
+        var byId = stats.ToDictionary(s => s.CustomerId);
+
+        return customers.Select(c =>
         {
-            Id = c.Id,
-            Name = c.Name,
-            Email = c.Email,
-            Phone = c.Phone,
-            BookingCount = c.Bookings.Count(b => b.Status != BookingStatus.Cancelled && b.Status != BookingStatus.NoShow),
-            TotalSpent = c.Bookings.Where(b => b.Status != BookingStatus.Cancelled && b.Status != BookingStatus.NoShow).Sum(b => b.TotalAmount),
-            LastBooking = c.Bookings.OrderByDescending(b => b.CreatedAtUtc).FirstOrDefault()?.CreatedAtUtc
+            byId.TryGetValue(c.Id, out var s);
+            return new CustomerRow
+            {
+                Id = c.Id,
+                Name = c.Name,
+                Email = c.Email,
+                Phone = c.Phone,
+                BookingCount = s?.Count ?? 0,
+                TotalSpent = s?.Total ?? 0,
+                LastBooking = s?.Last
+            };
         }).ToList();
     }
 

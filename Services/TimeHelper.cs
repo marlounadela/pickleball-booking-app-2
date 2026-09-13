@@ -1,9 +1,12 @@
+using System.Collections.Concurrent;
+
 using Picklebook.Domain;
 
 namespace Picklebook.Services;
 
 public static class YardTime
 {
+    private static readonly ConcurrentDictionary<string, TimeZoneInfo> TzCache = new();
     /// <summary>
     /// All booking dates/times are stored and interpreted in the yard's local time zone.
     /// </summary>
@@ -12,8 +15,11 @@ public static class YardTime
     public static TimeZoneInfo GetTz(string? timeZoneId)
     {
         if (string.IsNullOrWhiteSpace(timeZoneId)) return TimeZoneInfo.Local;
-        try { return TimeZoneInfo.FindSystemTimeZoneById(timeZoneId); }
-        catch { return TimeZoneInfo.Local; }
+        return TzCache.GetOrAdd(timeZoneId, id =>
+        {
+            try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
+            catch { return TimeZoneInfo.Local; }
+        });
     }
 
     public static DateTime NowInZone(string? timeZoneId)

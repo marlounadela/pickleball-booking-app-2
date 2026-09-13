@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
@@ -31,6 +32,37 @@ builder.Services.AddAuthentication(options =>
 var connectionString = builder.Configuration["DATABASE_URL"]
     ?? builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
+
+// Persist Data Protection keys next to the database so auth cookies, antiforgery tokens and
+// ProtectedBrowserStorage survive container restarts (when storage is persistent). Falls back
+// to an isolated in-memory/ephemeral location if the directory is not writable.
+var keysDir = Environment.GetEnvironmentVariable("DATA_PROTECTION_KEYS_PATH");
+if (string.IsNullOrWhiteSpace(keysDir))
+{
+    try
+    {
+        var raw = builder.Configuration["DATABASE_URL"] ?? builder.Configuration.GetConnectionString("DefaultConnection") ?? string.Empty;
+        var marker = "DataSource=";
+        var start = raw.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (start >= 0)
+        {
+            var path = raw[(start + marker.Length)..].Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(path))
+                keysDir = Path.Combine(Path.GetDirectoryName(path) ?? "Data", "keys");
+        }
+    }
+    catch { /* fall through to default below */ }
+    keysDir ??= Path.Combine("Data", "keys");
+}
+try
+{
+    Directory.CreateDirectory(keysDir);
+    builder.Services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(keysDir));
+}
+catch
+{
+    builder.Services.AddDataProtection();
+}
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlite(connectionString));
 builder.Services.AddDatabaseDeveloperPageExceptionFilter();
@@ -116,7 +148,21 @@ if (!app.Environment.IsDevelopment()
 
 app.UseHttpsRedirection();
 
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    // Versioned Blazor assets carry content hashes; long cache is safe. App-level CSS/JS must stay
+    // short-lived so redeploys take effect immediately.
+    OnPrepareResponse = ctx =>
+    {
+        var path = ctx.Context.Request.Path.Value ?? string.Empty;
+        if (path.StartsWith("/_framework/", StringComparison.OrdinalIgnoreCase))
+            ctx.Context.Response.Headers.CacheControl = "public, max-age=604800, immutable";
+        else if (path.Equals("/app.css", StringComparison.OrdinalIgnoreCase) ||
+                 path.Equals("/js/app.js", StringComparison.OrdinalIgnoreCase) ||
+                 path.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase))
+            ctx.Context.Response.Headers.CacheControl = "public, max-age=3600";
+    }
+});
 app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseAntiforgery();
 
@@ -125,5 +171,9 @@ app.MapRazorComponents<App>()
 
 // Add additional endpoints required by the Identity /Account Razor components.
 app.MapAdditionalIdentityEndpoints();
+
+// Lightweight readiness probe for container platforms (Vercel, Docker healthchecks).
+// No UI, auth, database, or business-logic impact.
+app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
 
 app.Run();

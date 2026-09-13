@@ -17,6 +17,6 @@ public static class CsvExport
     {
         if (value is null) return "";
         var v = value.Replace("\"", "\"\"");
-        return v.Contains(',') || v.Contains('"') || v.Contains('\n') ? $"\"{v}\"" : v;
+        return v.Contains(',') || v.Contains('"') || v.Contains('\n') || v.Contains('\r') ? $"\"{v}\"" : v;
     }
 }

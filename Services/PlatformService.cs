@@ -19,30 +19,30 @@ public class PlatformStats
 /// <summary>Super-admin platform-wide services.</summary>
 public class PlatformService(ApplicationDbContext db, UserManager<ApplicationUser> userManager)
 {
-    public bool IsSuperAdmin(IUserContext ctx) => true; // (authorization enforced by page attributes)
+    public async Task<bool> IsSuperAdminAsync(IUserContext ctx) => await ctx.IsInRoleAsync(AppRoles.SuperAdmin);
 
     public async Task<PlatformStats> GetStatsAsync()
     {
-        var bookedSlots = await db.Bookings.AsNoTracking()
-            .CountAsync(b => BookingActiveStatuses.Values.Contains(b.Status));
-        var today = DateOnly.FromDateTime(DateTime.Today);
+        var bookedSlotsToday = DateOnly.FromDateTime(DateTime.UtcNow);
         return new PlatformStats
         {
             TotalYards = await db.Yards.IgnoreQueryFilters().CountAsync(),
             ActiveYards = await db.Yards.CountAsync(y => y.Status == YardStatus.Active),
             TotalUsers = await db.Users.CountAsync(),
             TotalBookings = await db.Bookings.IgnoreQueryFilters().CountAsync(),
-            ActiveBookingsToday = bookedSlots,
+            ActiveBookingsToday = await db.Bookings.CountAsync(b =>
+                b.BookingDate == bookedSlotsToday && BookingActiveStatuses.Values.Contains(b.Status)),
             TotalTransactionValue = await db.Transactions.IgnoreQueryFilters().SumAsync(t => (decimal?)t.Amount) ?? 0,
             PlatformRevenue = await db.Transactions.IgnoreQueryFilters()
-                .SumAsync(t => (decimal?)(t.Type == TransactionType.BookingPayment ? t.Amount : 0)) ?? 0
+                .Where(t => t.Type == TransactionType.BookingPayment)
+                .SumAsync(t => (decimal?)t.Amount) ?? 0
         };
     }
 
     public async Task<List<Yard>> GetAllYardsAsync(bool includeDeleted = false)
     {
         IQueryable<Yard> q = db.Yards.AsNoTracking().Include(y => y.Owner).Include(y => y.Courts);
-        if (!includeDeleted) q = q.IgnoreQueryFilters();
+        if (includeDeleted) q = q.IgnoreQueryFilters();
         return await q.OrderByDescending(y => y.CreatedAtUtc).Take(500).ToListAsync();
     }
 
